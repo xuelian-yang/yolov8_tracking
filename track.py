@@ -276,7 +276,19 @@ def run(
                 if platform.system() == 'Linux' and p not in windows:
                     windows.append(p)
                     cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
+                    # cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
+                    im_size = list(im.size())
+                    win_w, win_h = im_size[-1], im_size[-2]
+                    cv2.resizeWindow(str(p), win_w, win_h)
+                # '''
+                if platform.system() == 'Windows' and p not in windows:
+                    windows.append(p)
+                    cv2.namedWindow(str(p), cv2.WINDOW_NORMAL)
+                    im_size = list(im.size())
+                    win_w, win_h = im_size[-1], im_size[-2]
+                    cv2.resizeWindow(str(p), win_w, win_h)
+                    cv2.moveWindow(str(p), 0, 0)
+                # '''
                 cv2.imshow(str(p), im0)
                 if cv2.waitKey(1) == ord('q'):  # 1 millisecond
                     exit()
