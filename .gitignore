@@ -6,6 +6,7 @@ __pycache__/
 # experiment results
 runs/
 videos/
+logs
 # weights
 
 # evaluation tools folder

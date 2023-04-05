@@ -41,6 +41,14 @@ from yolov8.ultralytics.yolo.utils.plotting import Annotator, colors, save_one_b
 
 from trackers.multi_tracker_zoo import create_tracker
 
+import time
+from termcolor import colored
+import os.path as osp
+
+from common.util import setup_log, d_print
+from configs.workspace import WorkSpace
+
+logger = logging.getLogger(__name__)
 
 @torch.no_grad()
 def run(
@@ -144,7 +152,13 @@ def run(
     #model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile(), Profile())
     curr_frames, prev_frames = [None] * bs, [None] * bs
+    time_step = time.time()
     for frame_idx, batch in enumerate(dataset):
+        time_lap = time.time()
+        if frame_idx % 50 == 0:
+            logger.info(f'  --> process frame {frame_idx:6d}')
+            d_print(f'  frame {frame_idx:6d} elapsed {1000. * (time_lap - time_step):.3f} ms')
+        time_step = time_lap
         path, im, im0s, vid_cap, s = batch
         visualize = increment_path(save_dir / Path(path[0]).stem, mkdir=True) if visualize else False
         with dt[0]:
@@ -373,5 +387,13 @@ def main(opt):
 
 
 if __name__ == "__main__":
+    time_beg = time.time()
+    this_filename = osp.basename(__file__)
+    setup_log(this_filename)
+
     opt = parse_opt()
     main(opt)
+
+    time_end = time.time()
+    logger.warning(f'{this_filename} elapsed {time_end - time_beg} seconds')
+    print(colored(f'{this_filename} elapsed {time_end - time_beg} seconds', 'yellow'))
