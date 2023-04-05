@@ -6,7 +6,7 @@ __pycache__/
 # experiment results
 runs/
 videos/
-weights
+# weights
 
 # evaluation tools folder
 val_utils/
@@ -17,7 +17,7 @@ val_utils/
 # exports
 *_openvino_model
 *.torchscript
-*.pt
+# *.pt
 *.onnx
 *.engine
 
