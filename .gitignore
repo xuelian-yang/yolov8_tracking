@@ -1,5 +1,6 @@
 .vscode/
-
+# .github/
+# .idea/
 # interpreter bytecode
 __pycache__/
 
@@ -8,6 +9,7 @@ runs/
 videos/
 logs
 # weights
+temp/
 
 # evaluation tools folder
 val_utils/
@@ -24,3 +26,7 @@ val_utils/
 
 # interactive plots
 *.html
+
+#customer
+assets/
+time_summary*.txt

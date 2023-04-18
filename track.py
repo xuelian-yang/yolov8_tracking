@@ -8,7 +8,9 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+import copy
 import sys
+import time
 import platform
 import numpy as np
 from pathlib import Path
@@ -41,14 +43,9 @@ from yolov8.ultralytics.yolo.utils.plotting import Annotator, colors, save_one_b
 
 from trackers.multi_tracker_zoo import create_tracker
 
-import time
-from termcolor import colored
-import os.path as osp
+from mask_generation import mask_generation
+from BEVmapping.utils.BEV_module import BEV_module
 
-from common.util import setup_log, d_print
-from configs.workspace import WorkSpace
-
-logger = logging.getLogger(__name__)
 
 @torch.no_grad()
 def run(
@@ -86,6 +83,27 @@ def run(
         vid_stride=1,  # video frame-rate stride
         retina_masks=False,
 ):
+    ########################### ALAGO Parameter
+    to_bev = True
+    direct_kf = True
+    direct_list = None
+    USING_ROI = True
+
+    ROI_dict = None
+    camera = 'src_A_W_145.231_W8.1'
+    # camera = 'W42'
+    if os.path.exists(os.path.join('BEVmapping', 'mapping_matrix', camera+'.json')):
+        BEV_jsonpath = os.path.join('BEVmapping', 'mapping_matrix', camera+'.json')
+        mapping = np.load(os.path.join('BEVmapping', 'mapping_matrix', 'mapping_'+camera+'.npy'))
+    else:
+        BEV_jsonpath = None
+        mapping = np.load(os.path.join('BEVmapping', 'homography', 'homo_'+camera+'.npy'))
+    bev = cv2.imread(os.path.join('BEVmapping', 'BEVimages', 'perspective_'+camera+'.png'))
+    if USING_ROI:
+        ROI_json_path = os.path.join('BEVmapping', 'json', 'road_'+camera+'.json')
+        src_path = os.path.join('BEVmapping', 'images', camera+'.png')
+        ROI_dict = mask_generation.polygons_to_mask(ROI_json_path, src_path)
+    #############################################
 
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -147,18 +165,13 @@ def run(
             if hasattr(tracker_list[i].model, 'warmup'):
                 tracker_list[i].model.warmup()
     outputs = [None] * bs
+    q_bev = [None] * bs
 
     # Run tracking
     #model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile(), Profile())
     curr_frames, prev_frames = [None] * bs, [None] * bs
-    time_step = time.time()
     for frame_idx, batch in enumerate(dataset):
-        time_lap = time.time()
-        if frame_idx % 50 == 0:
-            logger.info(f'  --> process frame {frame_idx:6d}')
-            d_print(f'  frame {frame_idx:6d} elapsed {1000. * (time_lap - time_step):.3f} ms')
-        time_step = time_lap
         path, im, im0s, vid_cap, s = batch
         visualize = increment_path(save_dir / Path(path[0]).stem, mkdir=True) if visualize else False
         with dt[0]:
@@ -180,9 +193,9 @@ def run(
                 proto = preds[1][-1]
             else:
                 p = non_max_suppression(preds, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-            
         # Process detections
         for i, det in enumerate(p):  # detections per image
+            start11 = time.time()
             seen += 1
             if webcam:  # bs >= 1
                 p, im0, _ = path[i], im0s[i].copy(), dataset.count
@@ -207,13 +220,18 @@ def run(
             s += '%gx%g ' % im.shape[2:]  # print string
             imc = im0.copy() if save_crop else im0  # for save_crop
 
+            bev_module = BEV_module(im0, im.shape[2:], bev, ROI_dict, mapping, BEV_jsonpath,)
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-            
-            if hasattr(tracker_list[i], 'tracker') and hasattr(tracker_list[i].tracker, 'camera_update'):
-                if prev_frames[i] is not None and curr_frames[i] is not None:  # camera motion compensation
-                    tracker_list[i].tracker.camera_update(prev_frames[i], curr_frames[i])
+            st = f'stage11:{time.time()-start11},'
+            start12 = time.time()
+            # if hasattr(tracker_list[i], 'tracker') and hasattr(tracker_list[i].tracker, 'camera_update'):
+            #     if prev_frames[i] is not None and curr_frames[i] is not None:  # camera motion compensation
+            #         tracker_list[i].tracker.camera_update(prev_frames[i], curr_frames[i])
+            st += f'stage12:{time.time()-start12},'
 
             if det is not None and len(det):
+                start2 = time.time()
+                bbox_all = copy.deepcopy(det[:, :4].cpu().numpy())
                 if is_seg:
                     shape = im0.shape
                     # scale bbox first the crop masks
@@ -230,11 +248,31 @@ def run(
                 for c in det[:, 5].unique():
                     n = (det[:, 5] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-
+                st += f'stage2:{time.time()-start2},'
                 # pass detections to strongsort
                 with dt[3]:
-                    outputs[i] = tracker_list[i].update(det.cpu(), im0)
-                
+                    if to_bev:
+                        bev_points = bev_module.to_BEV(
+                            masks=masks[i],
+                            det=bbox_all,
+                            mapping=mapping,
+                        )
+                    outputs[i], q_bev[i] = tracker_list[i].update(det.cpu(), im0, bev_points)
+                start3 = time.time()
+                if to_bev:
+                    bev_module.trajectory_bev(q_bev[i])
+
+                if direct_kf:
+                    direct_list = []
+                    for t in tracker_list[i].tracker.tracks:
+                        if not t.is_confirmed() or t.time_since_update > 1:
+                            continue
+                        x, y = t.mean_bev[0:2]
+                        dx, dy = t.mean_bev[4:6]
+                        x2, y2 = [x + dx * 20, y + dy*20]
+                        direct_list.append([x, y, x2, y2])
+                        # print(f'id={t.track_id} mean={t.mean}')
+
                 # draw boxes for visualization
                 if len(outputs[i]) > 0:
                     
@@ -244,9 +282,11 @@ def run(
                             masks[i],
                             colors=[colors(x, True) for x in det[:, 5]],
                             im_gpu=torch.as_tensor(im0, dtype=torch.float16).to(device).permute(2, 0, 1).flip(0).contiguous() /
-                            255 if retina_masks else im[i]
+                            255 if retina_masks else im[i],
+                            n=frame_idx,
                         )
-                    
+
+
                     for j, (output) in enumerate(outputs[i]):
                         
                         bbox = output[0:4]
@@ -279,31 +319,31 @@ def run(
                             if save_crop:
                                 txt_file_name = txt_file_name if (isinstance(path, list) and len(path) > 1) else ''
                                 save_one_box(np.array(bbox, dtype=np.int16), imc, file=save_dir / 'crops' / txt_file_name / names[c] / f'{id}' / f'{p.stem}.jpg', BGR=True)
-                            
+                st += f'stage3:{time.time()-start3},'
             else:
                 pass
                 #tracker_list[i].tracker.pred_n_update_all_tracks()
-                
+
+            start4 = time.time()
             # Stream results
             im0 = annotator.result()
+            # im0[bev_module.ROI == False]=[0, 0, 0]
+            if direct_kf and direct_list:                   # 使用卡尔曼预测航向角
+                for x, y, x2, y2 in direct_list:
+                    cv2.line(bev_module.bev_copy, (int(x), int(y)), (int(x2), int(y2)), (128, 255, 0), 10)
             if show_vid:
                 if platform.system() == 'Linux' and p not in windows:
                     windows.append(p)
                     cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+                    cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
+                    # cv2.namedWindow('BEV', 0)
+                else:
+                    cv2.namedWindow(str(p), 0)  # allow window resize (Linux)
                     # cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
-                    im_size = list(im.size())
-                    win_w, win_h = im_size[-1], im_size[-2]
-                    cv2.resizeWindow(str(p), win_w, win_h)
-                # '''
-                if platform.system() == 'Windows' and p not in windows:
-                    windows.append(p)
-                    cv2.namedWindow(str(p), cv2.WINDOW_NORMAL)
-                    im_size = list(im.size())
-                    win_w, win_h = im_size[-1], im_size[-2]
-                    cv2.resizeWindow(str(p), win_w, win_h)
-                    cv2.moveWindow(str(p), 0, 0)
-                # '''
-                cv2.imshow(str(p), im0)
+                bev_copy = cv2.resize(bev_module.bev_copy, (im0.shape[1], int(bev_module.bev_copy.shape[0]*(im0.shape[1]/bev_module.bev_copy.shape[1]))))
+                htich = np.vstack((im0, bev_copy))
+                # cv2.imshow('BEV', bev_module.bev_copy)
+                cv2.imshow(str(p), htich)
                 if cv2.waitKey(1) == ord('q'):  # 1 millisecond
                     exit()
 
@@ -318,13 +358,19 @@ def run(
                         w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                         h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     else:  # stream
-                        fps, w, h = 30, im0.shape[1], im0.shape[0]
+                        fps, w, h = 30, im0.shape[1], im0.shape[0]+bev_module.bev_copy.shape[0]
                     save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
                     vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                vid_writer[i].write(im0)
-
+                bev_copy = cv2.resize(bev_module.bev_copy, (im0.shape[1], int(bev_module.bev_copy.shape[0]*(im0.shape[1]/bev_module.bev_copy.shape[1]))))
+                htich = np.vstack((im0, bev_copy))
+                vid_writer[i].write(htich)
             prev_frames[i] = curr_frames[i]
-            
+            st += f'stage4:{time.time() - start4},'
+            st += f"model:{sum([dt.dt for dt in dt if hasattr(dt, 'dt')]) * 1E3:.1f}ms,"
+            st += f'total:{time.time() - start11}\n'
+            with open('time_summary.txt', 'a') as f:
+                f.writelines(st+'\n')
+
         # Print total time (preprocessing + inference + NMS + tracking)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{sum([dt.dt for dt in dt if hasattr(dt, 'dt')]) * 1E3:.1f}ms")
 
@@ -340,17 +386,19 @@ def run(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--yolo-weights', nargs='+', type=Path, default=WEIGHTS / 'yolov8s-seg.pt', help='model.pt path(s)')
-    parser.add_argument('--reid-weights', type=Path, default=WEIGHTS / 'osnet_x0_25_msmt17.pt')
-    parser.add_argument('--tracking-method', type=str, default='deepocsort', help='deepocsort, botsort, strongsort, ocsort, bytetrack')
+    parser.add_argument('--yolo-weights', nargs='+', type=Path, default='yolov8n-seg.pt', help='model.pt path(s)')
+    parser.add_argument('--reid-weights', type=Path, default='osnet_x0_25_msmt17.pt')
+    parser.add_argument('--tracking-method', type=str, default='strongsort', help='strongsort, ocsort, bytetrack')
     parser.add_argument('--tracking-config', type=Path, default=None)
-    parser.add_argument('--source', type=str, default='0', help='file/dir/URL/glob, 0 for webcam')  
+    # parser.add_argument('--source', type=str, default='rtsp://10.10.132.6:554/openUrl/yH3gzrq', help='file/dir/URL/glob, 0 for webcam')
+    parser.add_argument('--source', type=str, default='rtsp://admin:hik12345=@10.10.145.231/Streaming/Channels/101', help='file/dir/URL/glob, 0 for webcam')
+    # parser.add_argument('--source', type=str, default=r'/home/itti/Downloads/W_4.1_chan2_20230316_130436.mp4', help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
-    parser.add_argument('--conf-thres', type=float, default=0.5, help='confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.5, help='NMS IoU threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.2, help='confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.4, help='NMS IoU threshold')
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--show-vid', action='store_true', help='display tracking video results')
+    parser.add_argument('--show-vid', default=True, help='display tracking video results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-crop', action='store_true', help='save cropped prediction boxes')
@@ -358,7 +406,7 @@ def parse_opt():
     parser.add_argument('--save-vid', action='store_true', help='save video tracking results')
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
     # class 0 is person, 1 is bycicle, 2 is car... 79 is oven
-    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
+    parser.add_argument('--classes', default=[0,1,2,3,5,7,9], type=int, help='filter by class: --classes 0, or --classes 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--visualize', action='store_true', help='visualize features')
@@ -387,13 +435,5 @@ def main(opt):
 
 
 if __name__ == "__main__":
-    time_beg = time.time()
-    this_filename = osp.basename(__file__)
-    setup_log(this_filename)
-
     opt = parse_opt()
     main(opt)
-
-    time_end = time.time()
-    logger.warning(f'{this_filename} elapsed {time_end - time_beg} seconds')
-    print(colored(f'{this_filename} elapsed {time_end - time_beg} seconds', 'yellow'))

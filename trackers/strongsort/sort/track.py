@@ -68,7 +68,7 @@ class Track:
     """
 
     def __init__(self, detection, track_id, class_id, conf, n_init, max_age, ema_alpha,
-                 feature=None):
+                 feature=None, bev_point=None, suppose_xy=None):
         self.track_id = track_id
         self.class_id = int(class_id)
         self.hits = 1
@@ -90,9 +90,14 @@ class Track:
 
         self.kf = KalmanFilter()
         self.mean, self.covariance = self.kf.initiate(detection)
+        # 初始化bev点，若未存在BEV点则用（0，0）占位
+        self.mean_bev, self.covariance_bev = \
+            self.kf.initiate(np.concatenate((bev_point, suppose_xy))) if len(bev_point) > 0 else \
+            self.kf.initiate(np.concatenate(([0, 0], suppose_xy)))
         
         # Initializing trajectory queue
         self.q = deque(maxlen=25)
+        self.q_bev = deque(maxlen=25)
 
     def to_tlwh(self):
         """Get current position in bounding box format `(top left x, top left y,
@@ -256,6 +261,8 @@ class Track:
 
         """
         self.mean, self.covariance = self.kf.predict(self.mean, self.covariance)
+        self.mean_bev, self.covariance_bev = \
+            self.kf.predict(self.mean_bev, self.covariance_bev)
         self.age += 1
         self.time_since_update += 1
         
@@ -294,6 +301,12 @@ class Track:
         x_c = int((tlbr[0] + tlbr[2]) / 2)
         y_c = int((tlbr[1] + tlbr[3]) / 2)
         self.q.append(('observationupdate', (x_c, y_c)))
+        if len(detection.bev_point)>0:
+            # 计算bev下卡尔曼滤波速度
+            self.mean_bev, self.covariance_bev = \
+                self.kf.update(self.mean_bev, self.covariance_bev,
+                               np.concatenate((detection.bev_point, detection.suppose_xy)), detection.confidence)
+            self.q_bev.append(('observationupdate', (detection.bev_point[0], detection.bev_point[1])))
 
     def mark_missed(self):
         """Mark this track as missed (no association at the current time step).

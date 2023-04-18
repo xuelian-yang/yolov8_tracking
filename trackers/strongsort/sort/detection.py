@@ -26,10 +26,13 @@ class Detection(object):
 
     """
 
-    def __init__(self, tlwh, confidence, feature):
+    def __init__(self, tlwh, confidence, feature, bev_point):
+        self.suppose_xy = np.array([1, 15])                # 假设车辆大小为15*15, 此参数在kf中起到占位符作用
+
         self.tlwh = np.asarray(tlwh, dtype=np.float32)
         self.confidence = float(confidence)
         self.feature = np.asarray(feature.cpu(), dtype=np.float32)
+        self.bev_point = bev_point
 
     def to_tlbr(self):
         """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,

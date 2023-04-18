@@ -64,21 +64,6 @@ def create_tracker(tracker_type, tracker_config, reid_weights, device, half):
             lambda_=cfg.botsort.lambda_
         )
         return botsort
-    elif tracker_type == 'deepocsort':
-        from trackers.deepocsort.ocsort import OCSort
-        botsort = OCSort(
-            reid_weights,
-            device,
-            half,
-            det_thresh=cfg.deepocsort.det_thresh,
-            max_age=cfg.deepocsort.max_age,
-            min_hits=cfg.deepocsort.min_hits,
-            iou_threshold=cfg.deepocsort.iou_thresh,
-            delta_t=cfg.deepocsort.delta_t,
-            asso_func=cfg.deepocsort.asso_func,
-            inertia=cfg.deepocsort.inertia,
-        )
-        return botsort
     else:
         print('No such tracker')
         exit()

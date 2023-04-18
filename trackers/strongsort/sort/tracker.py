@@ -91,14 +91,14 @@ class Tracker:
             self._match(detections)
 
         # Update track set.
-        for track_idx, detection_idx in matches:
+        for track_idx, detection_idx in matches:    # TODO: 这里可以做ID匹配
             self.tracks[track_idx].update(
-                detections[detection_idx], classes[detection_idx], confidences[detection_idx])
+                detections[detection_idx], classes[detection_idx], confidences[detection_idx])         # modify
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
             if self.max_unmatched_preds != 0 and self.tracks[track_idx].updates_wo_assignment < self.tracks[track_idx].max_num_updates_wo_assignment:
                 bbox = self.tracks[track_idx].to_tlwh()
-                self.tracks[track_idx].update_kf(detection.to_xyah_ext(bbox))
+                self.tracks[track_idx].update_kf(detection.to_xyah_ext(bbox))                          # modify
         for detection_idx in unmatched_detections:
             self._initiate_track(detections[detection_idx], classes[detection_idx].item(), confidences[detection_idx].item())
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
@@ -188,5 +188,5 @@ class Tracker:
     def _initiate_track(self, detection, class_id, conf):
         self.tracks.append(Track(
             detection.to_xyah(), self._next_id, class_id, conf, self.n_init, self.max_age, self.ema_alpha,
-            detection.feature))
+            detection.feature, detection.bev_point, detection.suppose_xy))
         self._next_id += 1

@@ -38,7 +38,7 @@ class StrongSORT(object):
         self.tracker = Tracker(
             metric, max_iou_dist=max_iou_dist, max_age=max_age, n_init=n_init, max_unmatched_preds=max_unmatched_preds, mc_lambda=mc_lambda, ema_alpha=ema_alpha)
 
-    def update(self, dets,  ori_img):
+    def update(self, dets,  ori_img, bev_points=None):
         
         xyxys = dets[:, 0:4]
         confs = dets[:, 4]
@@ -52,7 +52,7 @@ class StrongSORT(object):
         # generate detections
         features = self._get_features(xywhs, ori_img)
         bbox_tlwh = self._xywh_to_tlwh(xywhs)
-        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i, conf in enumerate(
+        detections = [Detection(bbox_tlwh[i], conf, features[i], bev_points[i]) for i, conf in enumerate(
             confs)]
 
         # run on non-maximum supression
@@ -61,10 +61,11 @@ class StrongSORT(object):
 
         # update tracker
         self.tracker.predict()
-        self.tracker.update(detections, clss, confs)
+        self.tracker.update(detections, clss, confs)   # modify
 
         # output bbox identities
         outputs = []
+        q_bev = []
         for track in self.tracker.tracks:
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue
@@ -77,9 +78,10 @@ class StrongSORT(object):
             conf = track.conf
             queue = track.q
             outputs.append(np.array([x1, y1, x2, y2, track_id, class_id, conf, queue], dtype=object))
+            q_bev.append(track.q_bev)
         if len(outputs) > 0:
             outputs = np.stack(outputs, axis=0)
-        return outputs
+        return outputs, q_bev
 
     """
     TODO:
@@ -148,4 +150,4 @@ class StrongSORT(object):
             if p[0] == 'observationupdate': 
                 cv2.circle(im0, p[1], 2, color=color, thickness=thickness)
             else:
-                cv2.circle(im0, p[1], 2, color=(255,255,255), thickness=thickness)
+                cv2.circle(im0, p[1], 2, color=(255, 255, 255), thickness=thickness)
