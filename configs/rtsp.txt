@@ -1,0 +1,4 @@
+rtsp://admin:hik12345=@10.10.145.231:554/Streaming/Channels/101
+rtsp://admin:hik12345=@10.10.145.232:554/Streaming/Channels/101
+rtsp://admin:hik12345=@10.10.145.233:554/Streaming/Channels/101
+rtsp://admin:hik12345=@10.10.145.234:554/Streaming/Channels/101

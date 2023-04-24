@@ -1,0 +1,24 @@
+services:
+  yolov8_tracking:
+    image: yolov8_tracking:cuda11.6.0-cudnn8-runtime-ubuntu20.04-python3.8
+    restart: always
+    command: jupyter lab  --notebook-dir=/usr/src/app --ip=0.0.0.0 --no-browser --allow-root --port=8888 --NotebookApp.token='' 
+    hostname: yolov8_tracking
+    volumes:
+      - /mnt/d16archive/data/dev/yolov8_tracking:/usr/src/app
+      - /mnt/d16archive/data/alaco_video_archive/multi-stream-reocrds:/usr/src/app/mount
+    ports:
+      - '8888:8888'
+    ipc: host
+    ulimits:
+      memlock: '-1'
+      stack: '67108864'
+    deploy:
+      # restart_policy:
+      #   condition: always
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: ['gpu']

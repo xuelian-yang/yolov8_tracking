@@ -1,15 +1,16 @@
 .vscode/
-# .github/
-# .idea/
+.github/
+.idea/
 # interpreter bytecode
 __pycache__/
 
 # experiment results
 runs/
 videos/
-logs
-# weights
+weights
 temp/
+temp_*
+logs/
 
 # evaluation tools folder
 val_utils/
@@ -20,7 +21,7 @@ val_utils/
 # exports
 *_openvino_model
 *.torchscript
-# *.pt
+*.pt
 *.onnx
 *.engine
 
@@ -30,3 +31,5 @@ val_utils/
 #customer
 assets/
 time_summary*.txt
+*.mp4
+*.log

@@ -38,7 +38,7 @@ class StrongSORT(object):
         self.tracker = Tracker(
             metric, max_iou_dist=max_iou_dist, max_age=max_age, n_init=n_init, max_unmatched_preds=max_unmatched_preds, mc_lambda=mc_lambda, ema_alpha=ema_alpha)
 
-    def update(self, dets,  ori_img, bev_points=None):
+    def update(self, dets,  ori_img, bev_points=None, match=False):
         
         xyxys = dets[:, 0:4]
         confs = dets[:, 4]
@@ -81,8 +81,9 @@ class StrongSORT(object):
             q_bev.append(track.q_bev)
         if len(outputs) > 0:
             outputs = np.stack(outputs, axis=0)
+        if match:
+            return outputs, q_bev, self.tracker.matches
         return outputs, q_bev
-
     """
     TODO:
         Convert bbox from xc_yc_w_h to xtl_ytl_w_h

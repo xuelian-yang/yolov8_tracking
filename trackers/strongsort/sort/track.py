@@ -97,7 +97,7 @@ class Track:
         
         # Initializing trajectory queue
         self.q = deque(maxlen=25)
-        self.q_bev = deque(maxlen=25)
+        self.q_bev = deque(maxlen=25)   # BEV下轨迹
 
     def to_tlwh(self):
         """Get current position in bounding box format `(top left x, top left y,
@@ -261,6 +261,7 @@ class Track:
 
         """
         self.mean, self.covariance = self.kf.predict(self.mean, self.covariance)
+        # 预测BEV下速度
         self.mean_bev, self.covariance_bev = \
             self.kf.predict(self.mean_bev, self.covariance_bev)
         self.age += 1
@@ -302,7 +303,7 @@ class Track:
         y_c = int((tlbr[1] + tlbr[3]) / 2)
         self.q.append(('observationupdate', (x_c, y_c)))
         if len(detection.bev_point)>0:
-            # 计算bev下卡尔曼滤波速度
+            # 计算并更新bev下卡尔曼滤波速度
             self.mean_bev, self.covariance_bev = \
                 self.kf.update(self.mean_bev, self.covariance_bev,
                                np.concatenate((detection.bev_point, detection.suppose_xy)), detection.confidence)

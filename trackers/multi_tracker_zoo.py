@@ -1,7 +1,14 @@
+
+import logging
 from trackers.strongsort.utils.parser import get_config
 
 def create_tracker(tracker_type, tracker_config, reid_weights, device, half):
-    
+    logging.info(f'create_tracker('
+                 f'\n\ttracker_type:   {tracker_type},'
+                 f'\n\ttracker_config: {tracker_config}, '
+                 f'\n\treid_weights:   {reid_weights},'
+                 f'\n\tdevice:         {device},'
+                 f'\n\thalf:           {half})')
     cfg = get_config()
     cfg.merge_from_file(tracker_config)
     
